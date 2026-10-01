@@ -1,5 +1,6 @@
 """FastMCP stdio server: collect_week + fill_week."""
 
+import asyncio
 import os
 from pathlib import Path
 
@@ -37,7 +38,7 @@ def collect_week(week: str) -> dict:
 
 
 @mcp.tool()
-def fill_week(week: str, entries: dict[str, list[str]], dry_run: bool = False) -> dict:
+async def fill_week(week: str, entries: dict[str, list[str]], dry_run: bool = False) -> dict:
     """Trägt Stichpunkte in die BLok-Woche ein (ISO-Woche, z.B. '2026-W39').
 
     entries = {"betrieb": [...], "themen": [...], "schule": [...]}, je ein Stichpunkt
@@ -48,7 +49,9 @@ def fill_week(week: str, entries: dict[str, list[str]], dry_run: bool = False) -
     bad = set(entries) - set(blok.SECTIONS)
     if bad:
         raise ValueError(f"Unbekannte Bereiche: {bad}, erlaubt: {list(blok.SECTIONS)}")
-    return blok.fill_week(
+    # sync_playwright verweigert den laufenden asyncio-Loop von FastMCP -> eigener Thread
+    return await asyncio.to_thread(
+        blok.fill_week,
         _env("BLOK_USERNAME"),
         _env("BLOK_PASSWORD"),
         week,

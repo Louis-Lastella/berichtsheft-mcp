@@ -59,8 +59,10 @@ def fill_week(user: str, password: str, week: str, entries: dict, shot_dir: str,
             pg.fill("input[name^=uid]", user)
             pg.fill("input[name^=pwd]", password)
             pg.click("button[name=submitLogin]")
-            pg.wait_for_load_state("networkidle")
-            if "/login" in pg.url:
+            try:
+                # networkidle feuert vor dem Redirect -> auf echten URL-Wechsel warten
+                pg.wait_for_url(lambda u: "/login" not in u, timeout=20000)
+            except Exception:
                 raise LoginError("Login fehlgeschlagen (kein Retry, Kontosperre vermeiden)")
             pg.goto(f"{BASE}/report")
             pg.wait_for_load_state("networkidle")
