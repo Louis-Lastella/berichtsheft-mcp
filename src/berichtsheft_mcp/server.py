@@ -38,17 +38,24 @@ def collect_week(week: str) -> dict:
 
 
 @mcp.tool()
-async def fill_week(week: str, entries: dict[str, list[str]], dry_run: bool = False) -> dict:
-    """Trägt Stichpunkte in die BLok-Woche ein (ISO-Woche, z.B. '2026-W39').
+async def fill_week(week: str, entries: dict[str, list[str]], locations: dict[str, str] | None = None,
+                    dry_run: bool = False) -> dict:
+    """Trägt Stichpunkte tageweise ins BLok-Berichtsheft ein (ISO-Woche, z.B. '2026-W40').
 
-    entries = {"betrieb": [...], "themen": [...], "schule": [...]}, je ein Stichpunkt
-    pro Zeile. Bestehende Zeilen werden nie überschrieben, identische übersprungen.
+    entries = {"thursday": [...]} mit Wochentag (monday..friday) als Schlüssel, je ein
+    Stichpunkt pro Zeile. locations = {"thursday": "betrieb"} setzt den Ort des Tages
+    ("schule", "betrieb", "ueberbetrieblich"). Bestehende Zeilen werden nie
+    überschrieben, identische übersprungen.
     Nur nach ausdrücklicher Freigabe durch den Nutzer aufrufen. dry_run=True
     loggt nur ein und zeigt, was eingetragen würde.
     """
-    bad = set(entries) - set(blok.SECTIONS)
+    locations = locations or {}
+    bad = (set(entries) | set(locations)) - set(blok.DAYS)
     if bad:
-        raise ValueError(f"Unbekannte Bereiche: {bad}, erlaubt: {list(blok.SECTIONS)}")
+        raise ValueError(f"Unbekannte Tage: {bad}, erlaubt: {list(blok.DAYS)}")
+    bad = set(locations.values()) - set(blok.LOCATIONS)
+    if bad:
+        raise ValueError(f"Unbekannter Ort: {bad}, erlaubt: {list(blok.LOCATIONS)}")
     # sync_playwright verweigert den laufenden asyncio-Loop von FastMCP -> eigener Thread
     return await asyncio.to_thread(
         blok.fill_week,
@@ -58,6 +65,7 @@ async def fill_week(week: str, entries: dict[str, list[str]], dry_run: bool = Fa
         entries,
         str(Path(_env("SCREENSHOT_DIR", "~/.cache/berichtsheft")).expanduser()),
         dry_run,
+        locations,
     )
 
 

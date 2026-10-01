@@ -1,10 +1,8 @@
 """Fill the BLok weekly report (online-ausbildungsnachweis.de) via headless Playwright.
 
-The week form has three sections, each a list of one-line activities:
-  betrieb -> tableComp:monday     (Betriebliche Tätigkeiten)
-  themen  -> tableComp:tuesday    (Themen der Woche)
-  schule  -> tableComp:wednesday  (Berufsschule)
-Wicket names them after weekdays; they are NOT days.
+Account runs in BLok's Tagesformat (Benutzereinstellungen, "Wochenformat aktivieren" off):
+one block per weekday, tableComp:<monday..friday>, each a list of one-line activities
+plus a location select (Berufsschule / Ausbildungsbetrieb / Überbetrieblich).
 """
 
 import os
@@ -15,7 +13,8 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 BASE = "https://www.online-ausbildungsnachweis.de/blok"
-SECTIONS = {"betrieb": "monday", "themen": "tuesday", "schule": "wednesday"}
+DAYS = ("monday", "tuesday", "wednesday", "thursday", "friday")
+LOCATIONS = {"schule": "0", "betrieb": "1", "ueberbetrieblich": "2"}
 
 
 class LoginError(RuntimeError):
@@ -43,12 +42,13 @@ def _goto_week(pg, week: str):
     raise RuntimeError(f"Woche {week} nicht erreichbar")
 
 
-def _areas(pg, sec):
-    return pg.locator(f'textarea[name^="tableComp:{sec}:inputs:"][name$=":report"]')
+def _areas(pg, day):
+    return pg.locator(f'textarea[name^="tableComp:{day}:inputs:"][name$=":report"]')
 
 
-def fill_week(user: str, password: str, week: str, entries: dict, shot_dir: str, dry_run: bool = False) -> dict:
-    """entries = {"betrieb": [...], "themen": [...], "schule": [...]}; only empty rows are written."""
+def fill_week(user: str, password: str, week: str, entries: dict, shot_dir: str,
+              dry_run: bool = False, locations: dict | None = None) -> dict:
+    """entries = {"thursday": [...], ...}, locations = {"thursday": "betrieb"}; only empty rows are written."""
     res = {"week": week, "filled": [], "skipped": [], "failed": [], "screenshot": None}
     with sync_playwright() as p:
         # CHROMIUM_PATH lets you reuse a system chromium instead of `playwright install`
@@ -68,26 +68,36 @@ def fill_week(user: str, password: str, week: str, entries: dict, shot_dir: str,
             pg.wait_for_load_state("networkidle")
             _goto_week(pg, week)
 
-            for key, lines in entries.items():
-                sec = SECTIONS[key]
-                existing = [v.strip() for v in _areas(pg, sec).evaluate_all("a => a.map(t => t.value)")]
+            for day, loc in (locations or {}).items():
+                sel = pg.locator(f'select[name="tableComp:{day}:trspaceplus:location"]')
+                if sel.input_value() == LOCATIONS[loc]:
+                    continue
+                if dry_run:
+                    res["filled"].append(f"{day}: Ort {loc} (dry-run)")
+                    continue
+                sel.select_option(LOCATIONS[loc])
+                pg.wait_for_load_state("networkidle")
+                res["filled"].append(f"{day}: Ort {loc}")
+
+            for day, lines in entries.items():
+                existing = [v.strip() for v in _areas(pg, day).evaluate_all("a => a.map(t => t.value)")]
                 todo = [ln.strip() for ln in lines if ln.strip()]
-                res["skipped"] += [f"{key}: {ln}" for ln in todo if ln in existing]
+                res["skipped"] += [f"{day}: {ln}" for ln in todo if ln in existing]
                 todo = [ln for ln in todo if ln not in existing]
                 for line in todo:
                     if dry_run:
-                        res["filled"].append(f"{key}: {line} (dry-run)")
+                        res["filled"].append(f"{day}: {line} (dry-run)")
                         continue
-                    areas = _areas(pg, sec)
+                    areas = _areas(pg, day)
                     empty = [i for i in range(areas.count()) if not areas.nth(i).input_value().strip()]
                     if not empty:
                         n = areas.count()
-                        pg.click(f'a[name="tableComp:{sec}:addRow"]')
+                        pg.click(f'a[name="tableComp:{day}:addRow"]')
                         pg.wait_for_function(
                             "([s, n]) => document.querySelectorAll(`textarea[name^='tableComp:${s}:inputs:'][name$=':report']`).length > n",
-                            arg=[sec, n],
+                            arg=[day, n],
                         )
-                        areas = _areas(pg, sec)
+                        areas = _areas(pg, day)
                         empty = [areas.count() - 1]
                     ta = areas.nth(empty[0])
                     ta.fill(line)
@@ -101,9 +111,9 @@ def fill_week(user: str, password: str, week: str, entries: dict, shot_dir: str,
                             arg=ta.element_handle(),
                             timeout=8000,
                         )
-                        res["filled"].append(f"{key}: {line}")
+                        res["filled"].append(f"{day}: {line}")
                     except Exception:
-                        res["failed"].append(f"{key}: {line}")
+                        res["failed"].append(f"{day}: {line}")
 
             Path(shot_dir).mkdir(parents=True, exist_ok=True)
             res["screenshot"] = str(Path(shot_dir) / f"blok-{week}.png")
