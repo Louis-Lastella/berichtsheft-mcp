@@ -69,6 +69,31 @@ async def fill_week(week: str, entries: dict[str, list[str]], locations: dict[st
     )
 
 
+@mcp.tool()
+async def set_week(week: str, betrieb: list[list[str]] | None = None, themen: list[list[str]] | None = None,
+                   schule: list[list[str]] | None = None, dry_run: bool = False) -> dict:
+    """Setzt eine Woche im BLok-Wochenformat exakt (Text UND Stunden, überschreibt).
+
+    Je Block eine Liste von Zeilen [Text, Zeit], Zeit im Format "26h:45min", z.B.
+    betrieb=[["Backlog gepflegt", "26h:45min"]], schule=[["LF8: ...", "10h:30min"]].
+    Nicht übergebene Blöcke (None) bleiben unverändert, [] leert den Block (Text "" und 0h).
+    Gibt vorher/nachher-Änderungen zurück. Gibt die Woche NIE frei.
+    Nur nach ausdrücklicher Freigabe durch den Nutzer aufrufen; dry_run=True zeigt nur die Änderungen.
+    """
+    blocks = {k: v for k, v in {"betrieb": betrieb, "themen": themen, "schule": schule}.items() if v is not None}
+    plan = {week: blocks}
+    blok.validate_plan(plan)
+    out = await asyncio.to_thread(
+        blok.set_weeks,
+        _env("BLOK_USERNAME"),
+        _env("BLOK_PASSWORD"),
+        plan,
+        str(Path(_env("SCREENSHOT_DIR", "~/.cache/berichtsheft")).expanduser()),
+        dry_run,
+    )
+    return out[week]
+
+
 def main():
     mcp.run()
 
